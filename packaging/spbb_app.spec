@@ -4,7 +4,8 @@ from pathlib import Path
 
 block_cipher = None
 
-project_dir = Path(__file__).resolve().parent.parent
+_spec_dir = Path(globals().get("SPECPATH", Path.cwd()))
+project_dir = _spec_dir.parent
 assets_dir = project_dir / "assets"
 
 a = Analysis(
