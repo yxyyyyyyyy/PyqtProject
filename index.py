@@ -215,6 +215,7 @@ class DesktopPet(QWidget):
         self._once_hold_timer.timeout.connect(self._end_once_hold)
         self._once_hold_action = None
         self._once_hold_back_to = None
+        self._once_hold_ms = None
         self._last_activity_ts = time.monotonic()
         self._audio_output = QAudioOutput(self)
         self._audio_output.setVolume(0.9)
@@ -399,6 +400,27 @@ class DesktopPet(QWidget):
                 if image.pixelColor(x, y).alpha() > 0:
                     return True
         return False
+    
+    def _frames_have_visible_pixel(self, frames):
+        if not frames:
+            return False
+        n = len(frames)
+        probe = []
+        for idx in (0, 1, 2, n // 2, n - 2, n - 1):
+            if 0 <= idx < n:
+                probe.append(frames[idx])
+        seen = set()
+        for pixmap in probe:
+            key = int(pixmap.cacheKey()) if pixmap is not None else 0
+            if key in seen:
+                continue
+            seen.add(key)
+            if self._pixmap_has_visible_pixel(pixmap):
+                return True
+        for pixmap in frames:
+            if self._pixmap_has_visible_pixel(pixmap):
+                return True
+        return False
 
     def _current_scaled_pixmap(self):
         if not self.current_action or self.current_action not in self.actions:
@@ -437,6 +459,7 @@ class DesktopPet(QWidget):
         back_to = self._once_hold_back_to or self.default_action
         self._once_hold_action = None
         self._once_hold_back_to = None
+        self._once_hold_ms = None
         if action_name is None:
             return
         if self.current_action == action_name and self.action_mode == "once":
@@ -516,7 +539,7 @@ class DesktopPet(QWidget):
                 self.actions[entry] = {
                     "type": "frames",
                     "frames": frames,
-                    "visible": self._pixmap_has_visible_pixel(frames[0]),
+                    "visible": self._frames_have_visible_pixel(frames),
                 }
                 print(f"动作 '{entry}' 加载成功，共 {len(frames)} 帧")
 
@@ -578,7 +601,7 @@ class DesktopPet(QWidget):
                 self.actions[action_name] = {
                     "type": "frames",
                     "frames": frames,
-                    "visible": self._pixmap_has_visible_pixel(frames[0]),
+                    "visible": self._frames_have_visible_pixel(frames),
                 }
                 print(f"动作 '{action_name}' 加载成功，共 {len(frames)} 帧")
 
@@ -650,7 +673,12 @@ class DesktopPet(QWidget):
         if self.current_action != action_name:
             return
         if self.action_mode == "once":
-            if self._once_hold_action == action_name and self._once_hold_timer.isActive():
+            if (
+                self._once_hold_action == action_name
+                and self._once_hold_ms is not None
+                and not self._once_hold_timer.isActive()
+            ):
+                self._once_hold_timer.start(int(self._once_hold_ms))
                 return
             self.change_action(self.default_action, mode="loop")
         else:
@@ -674,11 +702,19 @@ class DesktopPet(QWidget):
             self._once_hold_timer.stop()
         self._once_hold_action = None
         self._once_hold_back_to = None
+        self._once_hold_ms = None
 
         self.current_action = action_name
         self.action_mode = mode
         self.image_index = 0
         action = self.actions.get(self.current_action)
+        if action and action.get("type") != "movie":
+            frames = action.get("frames") or []
+            if frames and not self._pixmap_has_visible_pixel(frames[0]):
+                for i in range(1, len(frames)):
+                    if self._pixmap_has_visible_pixel(frames[i]):
+                        self.image_index = i
+                        break
         if action and action.get("type") == "movie":
             movie = action.get("movie")
             if isinstance(movie, QMovie):
@@ -690,7 +726,7 @@ class DesktopPet(QWidget):
         elif mode == "once" and hold_ms is not None:
             self._once_hold_action = action_name
             self._once_hold_back_to = back_to
-            self._once_hold_timer.start(int(hold_ms))
+            self._once_hold_ms = int(hold_ms)
         self._update_mask_for_current_frame()
         self.update()
         # print(f"切换状态: {action_name} ({mode})")
@@ -709,8 +745,10 @@ class DesktopPet(QWidget):
         self.image_index += 1
         if self.image_index >= len(frames):
             if self.action_mode == 'once':
-                if self._once_hold_action == self.current_action:
+                if self._once_hold_action == self.current_action and self._once_hold_ms is not None:
                     self.image_index = max(0, len(frames) - 1)
+                    if not self._once_hold_timer.isActive():
+                        self._once_hold_timer.start(int(self._once_hold_ms))
                     self._update_mask_for_current_frame()
                     self.update()
                     return
