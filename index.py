@@ -344,7 +344,10 @@ class DesktopPet(QWidget):
         self._tray_watch_timer.timeout.connect(self._ensure_tray_icon_visible)
         self._tray_roam_action = None
         self._tray_breed_action = None
+        self._tray_mic_action = None
         self._song_active = False
+        self._mic_enabled = True
+        self._mic_available = False
         self._mic_active_ts = 0.0
         self._mic_last_action_ts = 0.0
         self._mic_level_ema = 0.0
@@ -688,12 +691,48 @@ class DesktopPet(QWidget):
         if self._breed_timer.isActive():
             self._breed_timer.stop()
 
+    def _start_mic(self):
+        if not self._mic_available or self._mic_input is None:
+            return
+        self._mic_io = self._mic_input.start()
+        if self._mic_io:
+            self._mic_io.readyRead.connect(self._on_mic_ready)
+        if not self._mic_timer.isActive():
+            self._mic_timer.start()
+
+    def _stop_mic(self):
+        if self._mic_timer.isActive():
+            self._mic_timer.stop()
+        if self._mic_input is not None:
+            try:
+                self._mic_input.stop()
+            except Exception:
+                pass
+        self._mic_io = None
+        if self._song_active:
+            self._song_active = False
+            if self.default_action is not None:
+                self.change_action(self.default_action, mode="loop")
+
+    def _toggle_mic(self):
+        if not self._mic_available:
+            return
+        self._mic_enabled = not self._mic_enabled
+        if self._tray_mic_action is not None:
+            self._tray_mic_action.setChecked(self._mic_enabled)
+        if self._mic_enabled:
+            self._start_mic()
+        else:
+            self._stop_mic()
+
     def _init_mic(self):
         if not self._is_master:
             return
         device = QMediaDevices.defaultAudioInput()
         if device.isNull():
+            self._mic_available = False
             return
+        self._mic_available = True
         fmt = QAudioFormat()
         fmt.setChannelCount(1)
         fmt.setSampleRate(44100)
@@ -712,10 +751,8 @@ class DesktopPet(QWidget):
                     self._mic_format = fmt
             else:
                 self._mic_format = fmt
-        self._mic_io = self._mic_input.start()
-        if self._mic_io:
-            self._mic_io.readyRead.connect(self._on_mic_ready)
-        self._mic_timer.start()
+        if self._mic_enabled:
+            self._start_mic()
 
     def _mic_level_from_data(self, data):
         if not data or self._mic_format is None:
@@ -779,6 +816,8 @@ class DesktopPet(QWidget):
         self._mic_last_action_ts = now
 
     def _poll_mic(self):
+        if not self._mic_enabled:
+            return
         if not self._mic_io:
             return
         if self._mic_io.bytesAvailable() <= 0:
@@ -1554,6 +1593,15 @@ class DesktopPet(QWidget):
             menu.addAction(breed_action)
             if register_tray:
                 self._tray_breed_action = breed_action
+
+        mic_action = QAction("监听麦克风", self)
+        mic_action.setCheckable(True)
+        mic_action.setChecked(self._mic_enabled)
+        mic_action.setEnabled(self._mic_available)
+        mic_action.triggered.connect(wrap(self._toggle_mic))
+        menu.addAction(mic_action)
+        if register_tray:
+            self._tray_mic_action = mic_action
 
         zoom_reset_action = QAction("重置大小", self)
         zoom_reset_action.triggered.connect(wrap(self._scale_reset))
