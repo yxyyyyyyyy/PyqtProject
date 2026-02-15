@@ -46,8 +46,6 @@ PET_HEIGHT = 128
 MIN_SCALE = 0.5
 MAX_SCALE = 3.0
 SCALE_STEP = 0.1
-BREED_INTERVAL_MS = 120000
-MAX_PETS = 20
 ROAM_TICK_MS = 16
 ROAM_SPEED_PX = 4
 # 动画刷新间隔 (毫秒)
@@ -95,8 +93,6 @@ ACTION_GIF_MAP = {
 }
 DEFAULT_ACTION_ORDER = ["attention", "love", "oMygad", "look"]
 # ===========================================
-
-ALL_PETS = []
 
 class MacGlobalKeyListener(QThread):
     keyPressed = pyqtSignal(int)
@@ -315,10 +311,6 @@ class DesktopPet(QWidget):
         self._roam_timer.setInterval(int(ROAM_TICK_MS))
         self._roam_timer.timeout.connect(self._on_roam_tick)
         self._roam_target = None
-        self._breed_enabled = False
-        self._breed_timer = QTimer(self)
-        self._breed_timer.setInterval(int(BREED_INTERVAL_MS))
-        self._breed_timer.timeout.connect(self._on_breed_tick)
         self._mouse_down = False
         self._mouse_drag_started = False
         self._double_clicking = False
@@ -329,12 +321,6 @@ class DesktopPet(QWidget):
         self._input_display_timer.setSingleShot(True)
         self._input_display_timer.timeout.connect(self._clear_input_text)
         self._last_hover_ts = 0.0
-        self._subtitle_text = ""
-        self._subtitle_timer = QTimer(self)
-        self._subtitle_timer.setSingleShot(True)
-        self._subtitle_timer.timeout.connect(self._clear_subtitle)
-        self._subtitle_persistent = False
-        self._idle_subtitle_active = False
         self._input_action_timer = QTimer(self)
         self._input_action_timer.setSingleShot(True)
         self._input_action_timer.timeout.connect(self._end_input_action)
@@ -343,7 +329,6 @@ class DesktopPet(QWidget):
         self._tray_watch_timer.setInterval(1000)
         self._tray_watch_timer.timeout.connect(self._ensure_tray_icon_visible)
         self._tray_roam_action = None
-        self._tray_breed_action = None
         self._tray_mic_action = None
         self._song_active = False
         self._mic_enabled = True
@@ -414,15 +399,11 @@ class DesktopPet(QWidget):
             self.setWindowIcon(icon)
         if "attention" in self.actions and self.actions["attention"].get("visible", True):
             self.change_action("attention", mode="loop")
-            self._idle_subtitle_active = True
-            self._set_subtitle("你在干什么", timeout_ms=None)
         self._update_mask_for_current_frame()
         self.update()
         ALL_PETS.append(self)
         if self._roam_enabled and not self._roam_timer.isActive():
             self._roam_timer.start()
-        if self._breed_enabled and not self._breed_timer.isActive():
-            self._breed_timer.start()
         if self._is_master:
             for delay in (0, 200, 800):
                 QTimer.singleShot(delay, self._ensure_tray_icon_visible)
@@ -507,9 +488,6 @@ class DesktopPet(QWidget):
 
     def _mark_user_active(self):
         self._last_activity_ts = time.monotonic()
-        if self._idle_subtitle_active:
-            self._idle_subtitle_active = False
-            self._clear_subtitle()
         if self.current_action == "attention" and self.default_action is not None:
             self.change_action(self.default_action, mode="loop")
 
@@ -529,9 +507,6 @@ class DesktopPet(QWidget):
             return
         if self.current_action != "attention":
             self.change_action("attention", mode="loop")
-        if not self._idle_subtitle_active:
-            self._idle_subtitle_active = True
-            self._set_subtitle("你在干什么", timeout_ms=None)
 
     def _try_create_movie(self, path):
         reader = QImageReader(path)
@@ -677,19 +652,6 @@ class DesktopPet(QWidget):
         self._roam_target = None
         if not self.is_dragging and self.default_action is not None:
             self.change_action(self.default_action, mode="loop")
-
-    def _toggle_breed(self):
-        if not self._is_master:
-            return
-        self._breed_enabled = not self._breed_enabled
-        if self._tray_breed_action is not None:
-            self._tray_breed_action.setChecked(self._breed_enabled)
-        if self._breed_enabled:
-            if not self._breed_timer.isActive():
-                self._breed_timer.start()
-            return
-        if self._breed_timer.isActive():
-            self._breed_timer.stop()
 
     def _start_mic(self):
         if not self._mic_available or self._mic_input is None:
@@ -872,30 +834,6 @@ class DesktopPet(QWidget):
         ny = max(g.top(), min(ny, g.bottom() - self.height() + 1))
         self.move(nx, ny)
 
-    def _spawn_child_pet(self):
-        if len(ALL_PETS) >= int(MAX_PETS):
-            return None
-        child = DesktopPet(is_master=False)
-        child._apply_scale(self._scale)
-        g = self._current_available_geometry()
-        ox = random.randint(-120, 120)
-        oy = random.randint(40, 180)
-        nx = max(g.left(), min(self.x() + ox, g.right() - child.width() + 1))
-        ny = max(g.top(), min(self.y() + oy, g.bottom() - child.height() + 1))
-        child.move(nx, ny)
-        return child
-
-    def _on_breed_tick(self):
-        if not self._breed_enabled:
-            return
-        if len(ALL_PETS) >= int(MAX_PETS):
-            return
-        if self.is_dragging:
-            return
-        self._spawn_child_pet()
-    
-
-
     def _current_scaled_pixmap(self):
         if not self.current_action or self.current_action not in self.actions:
             return None
@@ -939,8 +877,6 @@ class DesktopPet(QWidget):
         return scaled
 
     def _input_display_text(self):
-        if self._subtitle_text:
-            return self._subtitle_text
         if not self._input_text:
             return ""
         font = QFont(self.font())
@@ -973,23 +909,10 @@ class DesktopPet(QWidget):
         return QRect(int(x), int(y), int(rect_w), int(rect_h))
 
     def _set_subtitle(self, text, timeout_ms=None):
-        self._subtitle_text = text or ""
-        if timeout_ms is None:
-            self._subtitle_persistent = True
-            if self._subtitle_timer.isActive():
-                self._subtitle_timer.stop()
-        else:
-            self._subtitle_persistent = False
-            self._subtitle_timer.start(int(timeout_ms))
-        self._update_mask_for_current_frame()
-        self.update()
+        pass
 
     def _clear_subtitle(self):
-        self._subtitle_persistent = False
-        if self._subtitle_text:
-            self._subtitle_text = ""
-            self._update_mask_for_current_frame()
-            self.update()
+        pass
 
     def _show_input_action(self):
         if "love" not in self.actions or not self.actions["love"].get("visible", True):
@@ -1421,7 +1344,6 @@ class DesktopPet(QWidget):
                     i * interval_ms,
                     lambda hold=interval_ms: self._trigger_once("sly smile", hold_ms=hold),
                 )
-            self._set_subtitle("喜欢摸摸", timeout_ms=total_ms)
             event.accept()
 
     def enterEvent(self, event):
@@ -1618,25 +1540,12 @@ class DesktopPet(QWidget):
         menu.addAction(quit_action)
 
     def _show_context_menu(self, global_pos):
-        prev_subtitle = self._subtitle_text
-        prev_persistent = self._subtitle_persistent
-        was_idle_subtitle = self._idle_subtitle_active
-        if prev_subtitle:
-            self._clear_subtitle()
         try:
             if getattr(self, "_context_menu", None) is not None and self._context_menu.isVisible():
                 self._context_menu.close()
         except RuntimeError:
             self._context_menu = None
         menu = QMenu(self)
-        def _restore_subtitle():
-            if prev_subtitle:
-                if was_idle_subtitle:
-                    self._idle_subtitle_active = True
-                self._set_subtitle(
-                    prev_subtitle,
-                    timeout_ms=None if prev_persistent else INPUT_DISPLAY_TIMEOUT_MS,
-                )
         menu.setStyleSheet("""
             QMenu {
                 background-color: #FFFFFF;
@@ -1664,7 +1573,6 @@ class DesktopPet(QWidget):
         menu.setWindowFlags(Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint | Qt.WindowType.NoDropShadowWindowHint)
         menu.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         menu.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
-        menu.aboutToHide.connect(_restore_subtitle)
         self._context_menu = menu
         menu.destroyed.connect(lambda _=None: setattr(self, "_context_menu", None))
         self._populate_action_menu(menu, close_on_trigger=True)
