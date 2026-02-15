@@ -12,6 +12,7 @@ from PyQt6.QtGui import (
     QPixmap,
     QIcon,
     QPainter,
+    QPainterPath,
     QAction,
     QRegion,
     QMovie,
@@ -20,6 +21,8 @@ from PyQt6.QtGui import (
     QFontMetrics,
     QColor,
     QFont,
+    QCursor,
+    QBrush,
 )
 from PyQt6.QtMultimedia import QAudioOutput, QMediaPlayer, QAudioSource, QMediaDevices, QAudioFormat
 
@@ -48,6 +51,9 @@ MAX_SCALE = 3.0
 SCALE_STEP = 0.1
 ROAM_TICK_MS = 16
 ROAM_SPEED_PX = 4
+CHASE_TICK_MS = 30
+CHASE_SPEED_PX = 6
+HEART_COUNT = 8
 # 动画刷新间隔 (毫秒)
 REFRESH_RATE = 80
 # 移动速度 (键盘控制时)
@@ -93,6 +99,62 @@ ACTION_GIF_MAP = {
 }
 DEFAULT_ACTION_ORDER = ["attention", "love", "oMygad", "look"]
 # ===========================================
+
+ALL_PETS = []
+
+class HeartWidget(QWidget):
+    def __init__(self, x, y, size=20, parent=None):
+        super().__init__(None)
+        self.setWindowFlags(
+            Qt.WindowType.Window
+            | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.NoDropShadowWindowHint
+            | Qt.WindowType.Tool
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow, True)
+        self._size = size
+        self._vx = random.uniform(-3, 3)
+        self._vy = random.uniform(-5, -3)
+        self._alpha = 255
+        self.resize(size + 20, size + 20)
+        self.move(int(x - (size + 20) // 2), int(y - (size + 20) // 2))
+        self._timer = QTimer(self)
+        self._timer.setInterval(30)
+        self._timer.timeout.connect(self._animate)
+        self._timer.start()
+        self.show()
+
+    def _animate(self):
+        self._vy += 0.15
+        self.move(int(self.x() + self._vx), int(self.y() + self._vy))
+        self._alpha = max(0, self._alpha - 4)
+        if self._alpha <= 0:
+            self._timer.stop()
+            self.close()
+            self.deleteLater()
+        else:
+            self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        color = QColor(255, 80, 120, self._alpha)
+        painter.setBrush(QBrush(color))
+        painter.setPen(Qt.PenStyle.NoPen)
+        self._draw_heart(painter, (self.width() - self._size) // 2, (self.height() - self._size) // 2, self._size)
+
+    def _draw_heart(self, painter, x, y, size):
+        path = QPainterPath()
+        path.moveTo(x + size / 2, y + size / 4)
+        path.cubicTo(x + size / 2, y, x, y, x, y + size / 4)
+        path.cubicTo(x, y + size / 2, x + size / 2, y + size * 0.75, x + size / 2, y + size)
+        path.cubicTo(x + size / 2, y + size * 0.75, x + size, y + size / 2, x + size, y + size / 4)
+        path.cubicTo(x + size, y, x + size / 2, y, x + size / 2, y + size / 4)
+        painter.drawPath(path)
+
 
 class MacGlobalKeyListener(QThread):
     keyPressed = pyqtSignal(int)
@@ -311,6 +373,10 @@ class DesktopPet(QWidget):
         self._roam_timer.setInterval(int(ROAM_TICK_MS))
         self._roam_timer.timeout.connect(self._on_roam_tick)
         self._roam_target = None
+        self._chase_enabled = False
+        self._chase_timer = QTimer(self)
+        self._chase_timer.setInterval(int(CHASE_TICK_MS))
+        self._chase_timer.timeout.connect(self._on_chase_tick)
         self._mouse_down = False
         self._mouse_drag_started = False
         self._double_clicking = False
@@ -329,6 +395,7 @@ class DesktopPet(QWidget):
         self._tray_watch_timer.setInterval(1000)
         self._tray_watch_timer.timeout.connect(self._ensure_tray_icon_visible)
         self._tray_roam_action = None
+        self._tray_chase_action = None
         self._tray_mic_action = None
         self._song_active = False
         self._mic_enabled = True
@@ -643,6 +710,7 @@ class DesktopPet(QWidget):
         if self._tray_roam_action is not None:
             self._tray_roam_action.setChecked(self._roam_enabled)
         if self._roam_enabled:
+            self._stop_chase()
             self._roam_target = None
             if not self._roam_timer.isActive():
                 self._roam_timer.start()
@@ -652,6 +720,67 @@ class DesktopPet(QWidget):
         self._roam_target = None
         if not self.is_dragging and self.default_action is not None:
             self.change_action(self.default_action, mode="loop")
+
+    def _stop_roam(self):
+        if self._roam_timer.isActive():
+            self._roam_timer.stop()
+        self._roam_enabled = False
+        if self._tray_roam_action is not None:
+            self._tray_roam_action.setChecked(False)
+
+    def _toggle_chase(self):
+        self._chase_enabled = not self._chase_enabled
+        if self._tray_chase_action is not None:
+            self._tray_chase_action.setChecked(self._chase_enabled)
+        if self._chase_enabled:
+            self._stop_roam()
+            if not self._chase_timer.isActive():
+                self._chase_timer.start()
+            return
+        self._stop_chase()
+
+    def _stop_chase(self):
+        if self._chase_timer.isActive():
+            self._chase_timer.stop()
+        self._chase_enabled = False
+        if self._tray_chase_action is not None:
+            self._tray_chase_action.setChecked(False)
+        if not self.is_dragging and self.default_action is not None:
+            self.change_action(self.default_action, mode="loop")
+
+    def _on_chase_tick(self):
+        if not self._chase_enabled:
+            return
+        if self.is_dragging or self._mouse_down:
+            return
+        if self.action_mode == "once":
+            return
+        cursor_pos = QCursor.pos()
+        cur = self.pos()
+        dx = cursor_pos.x() - cur.x() - self.width() // 2
+        dy = cursor_pos.y() - cur.y() - self.height() // 2
+        dist = (dx * dx + dy * dy) ** 0.5
+        if dist < 10:
+            return
+        if "come" in self.actions and self.actions["come"].get("visible", True):
+            if self.current_action != "come" or self.action_mode != "loop":
+                self.change_action("come", mode="loop")
+        g = self._current_available_geometry()
+        step = int(CHASE_SPEED_PX)
+        nx = cur.x() + int(step * dx / dist)
+        ny = cur.y() + int(step * dy / dist)
+        nx = max(g.left(), min(nx, g.right() - self.width() + 1))
+        ny = max(g.top(), min(ny, g.bottom() - self.height() + 1))
+        self.move(nx, ny)
+
+    def _spawn_hearts(self):
+        center_x = self.x() + self.width() // 2
+        center_y = self.y() + self.height() // 2
+        for _ in range(HEART_COUNT):
+            size = 16 + random.randint(0, 8)
+            offset_x = random.randint(-30, 30)
+            offset_y = random.randint(-30, 10)
+            HeartWidget(center_x + offset_x, center_y + offset_y, size)
 
     def _start_mic(self):
         if not self._mic_available or self._mic_input is None:
@@ -1344,6 +1473,7 @@ class DesktopPet(QWidget):
                     i * interval_ms,
                     lambda hold=interval_ms: self._trigger_once("sly smile", hold_ms=hold),
                 )
+            self._spawn_hearts()
             event.accept()
 
     def enterEvent(self, event):
@@ -1507,14 +1637,13 @@ class DesktopPet(QWidget):
         if register_tray:
             self._tray_roam_action = roam_action
 
-        if self._is_master:
-            breed_action = QAction("繁殖模式", self)
-            breed_action.setCheckable(True)
-            breed_action.setChecked(self._breed_enabled)
-            breed_action.triggered.connect(wrap(self._toggle_breed))
-            menu.addAction(breed_action)
-            if register_tray:
-                self._tray_breed_action = breed_action
+        chase_action = QAction("追逐鼠标", self)
+        chase_action.setCheckable(True)
+        chase_action.setChecked(self._chase_enabled)
+        chase_action.triggered.connect(wrap(self._toggle_chase))
+        menu.addAction(chase_action)
+        if register_tray:
+            self._tray_chase_action = chase_action
 
         mic_action = QAction("监听麦克风", self)
         mic_action.setCheckable(True)
