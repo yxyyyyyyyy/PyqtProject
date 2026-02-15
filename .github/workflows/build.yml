@@ -6,6 +6,9 @@ on:
       - 'v*'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build-windows:
     name: Build Windows EXE
@@ -38,14 +41,6 @@ jobs:
       with:
         name: DesktopPet-Windows
         path: DesktopPet-Windows.zip
-    
-    - name: Release
-      uses: softprops/action-gh-release@v1
-      if: startsWith(github.ref, 'refs/tags/')
-      with:
-        files: DesktopPet-Windows.zip
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-mac:
     name: Build macOS App
@@ -78,11 +73,31 @@ jobs:
       with:
         name: DesktopPet-macOS
         path: DesktopPet-macOS.dmg
+
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: [build-windows, build-mac]
+    if: startsWith(github.ref, 'refs/tags/')
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Download Windows artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: DesktopPet-Windows
+    
+    - name: Download macOS artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: DesktopPet-macOS
     
     - name: Release
       uses: softprops/action-gh-release@v1
-      if: startsWith(github.ref, 'refs/tags/')
       with:
-        files: DesktopPet-macOS.dmg
+        files: |
+          DesktopPet-Windows.zip
+          DesktopPet-macOS.dmg
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
