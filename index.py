@@ -317,8 +317,10 @@ class DesktopPet(QWidget):
         self._roam_target = None
         self._breed_enabled = False
         self._breed_timer = QTimer(self)
-        self._breed_timer.setInterval(int(BREED_INTERVAL_MS))
+        self._breed_timer.setTimerType(Qt.TimerType.PreciseTimer)
+        self._breed_timer.setInterval(1000)
         self._breed_timer.timeout.connect(self._on_breed_tick)
+        self._breed_last_ts = 0.0
         self._mouse_down = False
         self._mouse_drag_started = False
         self._double_clicking = False
@@ -514,6 +516,7 @@ class DesktopPet(QWidget):
             self.change_action(self.default_action, mode="loop")
 
     def _check_idle(self):
+        self._maybe_breed()
         if self._roam_enabled:
             return
         if self.is_dragging:
@@ -685,8 +688,10 @@ class DesktopPet(QWidget):
         if self._tray_breed_action is not None:
             self._tray_breed_action.setChecked(self._breed_enabled)
         if self._breed_enabled:
+            self._breed_last_ts = 0.0
             if not self._breed_timer.isActive():
                 self._breed_timer.start()
+            self._on_breed_tick()
             return
         if self._breed_timer.isActive():
             self._breed_timer.stop()
@@ -724,6 +729,13 @@ class DesktopPet(QWidget):
             self._start_mic()
         else:
             self._stop_mic()
+
+    def _maybe_breed(self):
+        if not self._breed_enabled:
+            return
+        if len(ALL_PETS) >= int(MAX_PETS):
+            return
+        self._on_breed_tick()
 
     def _init_mic(self):
         if not self._is_master:
@@ -890,8 +902,10 @@ class DesktopPet(QWidget):
             return
         if len(ALL_PETS) >= int(MAX_PETS):
             return
-        if self.is_dragging:
+        now = time.monotonic()
+        if self._breed_last_ts > 0.0 and (now - self._breed_last_ts) * 1000 < BREED_INTERVAL_MS:
             return
+        self._breed_last_ts = now
         self._spawn_child_pet()
     
 

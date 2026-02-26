@@ -1,0 +1,103 @@
+name: Build Desktop App
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build Windows EXE
+    runs-on: windows-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+        cache: 'pip'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Build with PyInstaller
+      run: |
+        pyinstaller --clean --onefile --windowed --name "桌宠" --add-data "assets;assets" --hidden-import PyQt6 --hidden-import PyQt6.QtCore --hidden-import PyQt6.QtGui --hidden-import PyQt6.QtWidgets --hidden-import PyQt6.QtMultimedia index.py
+    
+    - name: Create ZIP
+      run: |
+        Compress-Archive -Path dist\桌宠.exe -DestinationPath DesktopPet-Windows.zip
+    
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: DesktopPet-Windows
+        path: DesktopPet-Windows.zip
+
+  build-mac:
+    name: Build macOS App
+    runs-on: macos-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+        cache: 'pip'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Build with PyInstaller
+      run: |
+        pyinstaller --clean package/desktop_pet.spec
+    
+    - name: Create DMG
+      run: |
+        hdiutil create -volname "桌宠" -srcfolder dist/桌宠.app -ov -format UDZO DesktopPet-macOS.dmg
+    
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: DesktopPet-macOS
+        path: DesktopPet-macOS.dmg
+
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: [build-windows, build-mac]
+    if: startsWith(github.ref, 'refs/tags/')
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Download Windows artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: DesktopPet-Windows
+    
+    - name: Download macOS artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: DesktopPet-macOS
+    
+    - name: Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          DesktopPet-Windows.zip
+          DesktopPet-macOS.dmg
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
