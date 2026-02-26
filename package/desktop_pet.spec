@@ -7,7 +7,7 @@ a = Analysis(
     pathex=['..'],
     binaries=[],
     datas=[
-        ('assets', 'assets'),
+        ('../assets', 'assets'),
     ],
     hiddenimports=[
         'PyQt6',
