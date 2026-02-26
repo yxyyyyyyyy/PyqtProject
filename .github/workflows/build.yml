@@ -30,17 +30,17 @@ jobs:
     
     - name: Build with PyInstaller
       run: |
-        pyinstaller --clean --onefile --windowed --name "桌宠" --add-data "assets;assets" --hidden-import PyQt6 --hidden-import PyQt6.QtCore --hidden-import PyQt6.QtGui --hidden-import PyQt6.QtWidgets --hidden-import PyQt6.QtMultimedia index.py
+        pyinstaller --clean --onefile --windowed --name "桌宠suanpi" --add-data "assets;assets" --hidden-import PyQt6 --hidden-import PyQt6.QtCore --hidden-import PyQt6.QtGui --hidden-import PyQt6.QtWidgets --hidden-import PyQt6.QtMultimedia index.py
     
     - name: Create ZIP
       run: |
-        Compress-Archive -Path dist\桌宠.exe -DestinationPath DesktopPet-Windows.zip
+        Compress-Archive -Path dist\桌宠suanpi.exe -DestinationPath DesktopPet-Windows-suanpi.zip
     
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
-        name: DesktopPet-Windows
-        path: DesktopPet-Windows.zip
+        name: DesktopPet-Windows-suanpi
+        path: DesktopPet-Windows-suanpi.zip
 
   build-mac:
     name: Build macOS App
@@ -97,7 +97,7 @@ jobs:
       uses: softprops/action-gh-release@v1
       with:
         files: |
-          DesktopPet-Windows.zip
+          DesktopPet-Windows-suanpi.zip
           DesktopPet-macOS.dmg
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
