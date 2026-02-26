@@ -86,7 +86,7 @@ jobs:
     - name: Download Windows artifact
       uses: actions/download-artifact@v4
       with:
-        name: DesktopPet-Windows
+        name: DesktopPet-Windows-suanpi
     
     - name: Download macOS artifact
       uses: actions/download-artifact@v4
