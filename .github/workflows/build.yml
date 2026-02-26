@@ -62,11 +62,11 @@ jobs:
     
     - name: Build with PyInstaller
       run: |
-        pyinstaller --clean package/desktop_pet.spec
+        cd package && pyinstaller --clean desktop_pet.spec
     
     - name: Create DMG
       run: |
-        hdiutil create -volname "桌宠" -srcfolder dist/桌宠.app -ov -format UDZO DesktopPet-macOS.dmg
+        hdiutil create -volname "桌宠" -srcfolder package/dist/桌宠.app -ov -format UDZO DesktopPet-macOS.dmg
     
     - name: Upload artifact
       uses: actions/upload-artifact@v4
